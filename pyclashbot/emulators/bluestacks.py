@@ -646,59 +646,87 @@ class BlueStacksEmulatorController(AdbBasedController):
         # Wait for only our instance
         boot_timeout = 180
         t0 = time.time()
+
         while not self._is_this_instance_running():
             if time.time() - t0 > boot_timeout:
                 self.logger.change_status("Timeout waiting for pyclashbot instance to start - retrying...")
                 return False
+
             interruptible_sleep(0.5)
+
+        # Extra boot delay for Android 13 / BlueStacks
+        self.logger.change_status("Waiting for Android system boot...")
+        interruptible_sleep(20)
 
         # Refresh port after boot
         self._refresh_instance_port()
+
         if not self.device_serial:
             self.logger.change_status("No ADB port resolved for this instance.")
             return False
 
         # Connect ADB scoped to our device
         self.logger.change_status(f"Connecting ADB to {self.device_serial} ...")
+
         t1 = time.time()
+
         while not self._connect():
             if time.time() - t1 > 60:
                 self.logger.change_status("Failed to connect ADB to BlueStacks 5 - retrying...")
-                return False  # if this makes issues big problems
+                return False
+
             interruptible_sleep(1)
 
-        # Launch Clash Royale
+        # Wait for Android package manager to become ready
         clash_pkg = "com.supercell.clashroyale"
+
+        self.logger.change_status("Waiting for Android package manager...")
+
+        deadline = time.time() + 60
+
+        while time.time() < deadline:
+            res = self.adb("shell pm list packages")
+
+            if res.stdout and clash_pkg in res.stdout:
+                self.logger.log("Clash Royale package detected.")
+                break
+
+            interruptible_sleep(2)
+
+        else:
+            self.logger.log("Package manager timeout.")
+            return False
+
+        # Launch Clash Royale
         self.logger.change_status("Launching Clash Royale...")
 
-        # Use inherited start_app which handles installation check
         if not self.start_app(clash_pkg):
-            # This means app is not installed and user is being prompted.
-            # We must wait for the installation loop (handled by base class) to finish
-            # The base class's _wait_for_clash_installation will block until
-            # the user clicks 'Retry' and the app is found.
             self.logger.log("Waiting for app installation...")
-
-            # After _wait_for_clash_installation returns True, we need to manually
-            # re-trigger the app start, because the original call failed.
             self.start_app(clash_pkg)
 
-        interruptible_sleep(5)
+        interruptible_sleep(10)
 
         # Wait for main menu
         self.logger.change_status("Waiting for Clash Royale main menu...")
+
         deadline = time.time() + 240
+
         while time.time() < deadline:
             if check_if_on_clash_main_menu(self):
                 self.logger.change_status("Clash Royale main menu detected")
+
                 dur = f"{time.time() - start_ts:.1f}s"
+
                 self.logger.log(f"BlueStacks 5 restart completed in {dur}")
+
                 return True
-            self.click(35, 405)  # Use inherited click
+
+            self.click(35, 405)
+
+            interruptible_sleep(2)
 
         self.logger.change_status("Timeout waiting for Clash main menu - retrying...")
         return False
-
     # click() is now inherited from AdbBasedController
     # swipe() is now inherited from AdbBasedController
     # screenshot() is now inherited from AdbBasedController

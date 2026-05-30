@@ -1,0 +1,2 @@
+match,result,terminal_reward,loss,epsilon,steps,win_rate,archetype
+1,WIN,100.0,292.0116,0.8699,68,1.000,LOG_BAIT
